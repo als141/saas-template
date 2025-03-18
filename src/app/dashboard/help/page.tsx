@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
-import { DashboardHeader } from "@/components/dashboard/dashboard-header";
-import { DashboardShell } from "@/components/dashboard/dashboard-shell";
+import { DashboardHeader } from "@/app/dashboard/dashboard-header";
+import { DashboardShell } from "@/app/dashboard/dashboard-shell";
 import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";

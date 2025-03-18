@@ -5,7 +5,8 @@ import { supabase } from "@/lib/supabase/client";
 
 export async function POST(req: Request) {
   const body = await req.text();
-  const signature = headers().get("Stripe-Signature") as string;
+  const headersList = await headers();
+  const signature = headersList.get("Stripe-Signature") as string;
 
   let event;
 
@@ -73,13 +74,15 @@ export async function POST(req: Request) {
   if (event.type === "customer.subscription.deleted") {
     const subscription = event.data.object;
     
-    // サブスクリプションをキャンセル状態に更新
+    // サブスクリプションをキャンセル状態に更新 - ended_atがnullの可能性を考慮
     await supabase
       .from("subscriptions")
       .update({
         status: "canceled",
         cancel_at_period_end: false,
-        ended_at: new Date(subscription.ended_at * 1000).toISOString(),
+        ended_at: subscription.ended_at 
+          ? new Date(subscription.ended_at * 1000).toISOString() 
+          : new Date().toISOString(), // nullの場合は現在の日時を使用
         canceled_at: new Date().toISOString(),
       })
       .eq("id", subscription.id);

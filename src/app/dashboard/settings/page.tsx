@@ -1,12 +1,12 @@
 import { redirect } from "next/navigation";
-import { DashboardHeader } from "@/components/dashboard/dashboard-header";
-import { DashboardShell } from "@/components/dashboard/dashboard-shell";
+import { DashboardHeader } from "@/app/dashboard/dashboard-header";
+import { DashboardShell } from "@/app/dashboard/dashboard-shell";
 import { currentUser } from "@clerk/nextjs/server";
 import { supabase } from "@/lib/supabase/client";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import { UserSettingsForm } from "@/components/dashboard/user-settings-form";
-import { NotificationsForm } from "@/components/dashboard/notifications-form";
+import { UserSettingsForm } from "@/app/dashboard/user-settings-form";
+import { NotificationsForm } from "@/app/dashboard/notifications-form";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { formatDate } from "@/lib/utils";
 

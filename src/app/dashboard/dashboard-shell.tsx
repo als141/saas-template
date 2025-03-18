@@ -1,4 +1,4 @@
-import { DashboardNav } from "@/components/dashboard/dashboard-nav";
+import { DashboardNav } from "@/app/dashboard/dashboard-nav";
 import { cn } from "@/lib/utils";
 import { UserButton } from "@clerk/nextjs";
 import { ModeToggle } from "@/components/mode-toggle";

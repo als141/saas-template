@@ -1,11 +1,12 @@
-import { auth, currentUser } from "@clerk/nextjs";
+import { auth, currentUser } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 import { stripe } from "@/lib/stripe/client";
 import { supabase } from "@/lib/supabase/client";
 
 export async function GET(req: Request) {
   try {
-    const { userId } = auth();
+    const authResult = await auth();
+    const userId = authResult.userId;
     const user = await currentUser();
 
     if (!userId || !user) {

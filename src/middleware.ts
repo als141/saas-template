@@ -1,7 +1,7 @@
-import { authMiddleware } from "@clerk/nextjs";
-import { NextResponse } from "next/server";
-import type { NextRequest } from "next/server";
-import { supabase } from "@/lib/supabase/client";
+import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server';
+import { NextResponse } from 'next/server';
+import type { NextRequest } from 'next/server';
+import { supabase } from '@/lib/supabase/client';
 
 // プレミアム機能へのアクセスに必要なページのパス
 const PREMIUM_PATHS = [
@@ -21,44 +21,50 @@ async function hasActiveSubscription(userId: string) {
   return !!data;
 }
 
-export default authMiddleware({
-  publicRoutes: [
-    "/",
-    "/sign-in(.*)",
-    "/sign-up(.*)",
-    "/pricing",
-    "/features",
-    "/blog(.*)",
-    "/api/webhooks/stripe",
-    "/api/webhooks/clerk",
-    "/terms",
-    "/privacy",
-    "/contact",
-  ],
-  async afterAuth(auth, req) {
-    // 未認証ユーザーがプロテクトされたルートにアクセスしようとした場合
-    if (!auth.userId && !auth.isPublicRoute) {
-      const signInUrl = new URL("/sign-in", req.url);
-      signInUrl.searchParams.set("redirect_url", req.url);
-      return NextResponse.redirect(signInUrl);
+export default clerkMiddleware(async (auth, req: NextRequest) => {
+  // 未認証ユーザーがプロテクトされたルートにアクセスしようとした場合
+  const { userId, sessionClaims } = await auth();
+  if (!userId && !isPublicRoute(req)) {
+    const signInUrl = new URL("/sign-in", req.url);
+    signInUrl.searchParams.set("redirect_url", req.url);
+    return NextResponse.redirect(signInUrl);
+  }
+
+  // プレミアム機能へのアクセスを確認
+  if (userId && PREMIUM_PATHS.some(path => req.nextUrl.pathname.startsWith(path))) {
+    const isPremium = await hasActiveSubscription(userId);
+
+    if (!isPremium) {
+      // サブスクリプションがない場合は料金ページにリダイレクト
+      const pricingUrl = new URL("/pricing", req.url);
+      pricingUrl.searchParams.set("notice", "premium_required");
+      return NextResponse.redirect(pricingUrl);
     }
+  }
 
-    // プレミアム機能へのアクセスを確認
-    if (auth.userId && PREMIUM_PATHS.some(path => req.nextUrl.pathname.startsWith(path))) {
-      const isPremium = await hasActiveSubscription(auth.userId);
-
-      if (!isPremium) {
-        // サブスクリプションがない場合は料金ページにリダイレクト
-        const pricingUrl = new URL("/pricing", req.url);
-        pricingUrl.searchParams.set("notice", "premium_required");
-        return NextResponse.redirect(pricingUrl);
-      }
-    }
-
-    return NextResponse.next();
-  },
+  return NextResponse.next();
 });
 
+// 認証が不要な公開ルート
+const isPublicRoute = createRouteMatcher([
+  '/',
+  '/sign-in(.*)',
+  '/sign-up(.*)',
+  '/pricing',
+  '/features',
+  '/blog(.*)',
+  '/api/webhooks/stripe',
+  '/api/webhooks/clerk',
+  '/terms',
+  '/privacy',
+  '/contact',
+]);
+
 export const config = {
-  matcher: ["/((?!.+\\.[\\w]+$|_next).*)", "/", "/(api|trpc)(.*)"],
+  matcher: [
+    // Skip Next.js internals and all static files, unless found in search params
+    '/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)',
+    // Always run for API routes
+    '/(api|trpc)(.*)',
+  ],
 };

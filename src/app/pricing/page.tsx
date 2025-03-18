@@ -5,8 +5,19 @@ import { PricingCard } from "@/components/pricing-card";
 import { stripe } from "@/lib/stripe/client";
 import { formatPrice } from "@/lib/utils";
 import { Check } from "lucide-react";
+import Stripe from "stripe";
 
-async function getProductsAndPrices() {
+interface Product {
+  id: string;
+  name: string;
+  description: string | null;
+  price: string | null;
+  priceId: string;
+  interval: string | null;
+  features: string[];
+}
+
+async function getProductsAndPrices(): Promise<Product[]> {
   const products = await stripe.products.list({
     active: true,
     expand: ["data.default_price"],
@@ -14,8 +25,8 @@ async function getProductsAndPrices() {
 
   return products.data
     .sort((a, b) => {
-      const priceA = (a.default_price as Stripe.Price)?.unit_amount || 0;
-      const priceB = (b.default_price as Stripe.Price)?.unit_amount || 0;
+      const priceA = ((a.default_price as Stripe.Price)?.unit_amount || 0);
+      const priceB = ((b.default_price as Stripe.Price)?.unit_amount || 0);
       return priceA - priceB;
     })
     .map((product) => {
@@ -26,7 +37,7 @@ async function getProductsAndPrices() {
         description: product.description,
         price: price.unit_amount ? formatPrice(price.unit_amount / 100) : null,
         priceId: price.id,
-        interval: price.type === "recurring" ? price.recurring?.interval : null,
+        interval: price.type === "recurring" ? (price.recurring?.interval ?? null) : null,
         features: (product.metadata.features || "").split(","),
       };
     });

@@ -5,7 +5,8 @@ import { supabase } from "@/lib/supabase/client";
 
 export async function POST(req: Request) {
   try {
-    const { userId } = auth();
+    const authResult = await auth();
+    const userId = authResult.userId;
     const user = await currentUser();
 
     if (!userId || !user) {

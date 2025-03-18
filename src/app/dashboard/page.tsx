@@ -3,10 +3,17 @@ import { DashboardHeader } from "@/app/dashboard/dashboard-header";
 import { DashboardShell } from "@/app/dashboard/dashboard-shell";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { currentUser } from "@clerk/nextjs/server";
-import { supabase } from "@/lib/supabase/client";
+import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { formatPrice } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { ArrowRight, CreditCard, Settings, HelpCircle, Star } from "lucide-react";
+
+// 価格表示用のヘルパー関数
+function displayPrice(amount: number | null | undefined): string {
+  if (amount === null || amount === undefined) return "無料";
+  return formatPrice(amount);
+}
 
 export default async function DashboardPage() {
   const user = await currentUser();
@@ -15,22 +22,57 @@ export default async function DashboardPage() {
     redirect("/sign-in");
   }
 
+  // サーバーサイドでSupabaseクライアントを作成
+  const supabase = createServerSupabaseClient();
+
+  // テーブルが存在するかチェック
+  try {
+    // 製品と価格データを取得
+    const { data: prices, error: pricesError } = await supabase
+      .from("prices")
+      .select("*");
+
+    if (pricesError) {
+      console.error("Prices query error:", pricesError);
+    } else {
+      console.log("Prices data:", prices);
+    }
+  } catch (err) {
+    console.error("Database check error:", err);
+  }
+
   // サブスクリプション情報を取得
-  const { data: subscriptionData } = await supabase
+  const { data: subscriptionData, error: subscriptionError } = await supabase
     .from("subscriptions")
     .select("*, prices(*)")
     .eq("user_id", user.id)
     .eq("status", "active")
     .single();
 
+  if (subscriptionError) {
+    console.log("Subscription query error:", subscriptionError);
+  } else {
+    console.log("Subscription data:", subscriptionData);
+  }
+
   const isPremium = !!subscriptionData;
 
   // ユーザー情報をSupabaseから取得
-  const { data: userData } = await supabase
+  const { data: userData, error: userError } = await supabase
     .from("users")
     .select("*")
     .eq("clerk_id", user.id)
     .single();
+
+  if (userError) {
+    console.log("User query error:", userError);
+  } else {
+    console.log("User data:", userData);
+  }
+
+  // 成功パラメータがある場合（サブスクリプション購入後など）
+  const searchParams = new URL(globalThis.location?.href || "http://localhost").searchParams;
+  const success = searchParams.get("success") === "true";
 
   return (
     <DashboardShell>
@@ -53,6 +95,20 @@ export default async function DashboardPage() {
         )}
       </DashboardHeader>
 
+      {success && (
+        <div className="bg-green-50 border border-green-200 text-green-800 rounded-lg p-4 mb-6">
+          <p className="font-medium">サブスクリプションが正常に処理されました！</p>
+          <p className="text-sm">新しいプランでご利用いただけます。ありがとうございます。</p>
+        </div>
+      )}
+
+      {subscriptionError && (
+        <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 rounded-lg p-4 mb-6">
+          <p className="font-medium">サブスクリプション情報の取得中にエラーが発生しました</p>
+          <p className="text-sm">データベースのセットアップを確認してください: {subscriptionError.message}</p>
+        </div>
+      )}
+
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
@@ -66,7 +122,9 @@ export default async function DashboardPage() {
               {isPremium ? subscriptionData.prices?.description || "有料プラン" : "無料プラン"}
             </div>
             <p className="text-xs text-muted-foreground mt-1">
-              {isPremium ? "アクティブなサブスクリプションがあります" : "無料プランをご利用中です"}
+              {isPremium 
+                ? `${displayPrice(subscriptionData.prices?.unit_amount)} / ${subscriptionData.prices?.interval === "month" ? "月" : "年"}`
+                : "無料プランをご利用中です"}
             </p>
             <Button asChild variant="ghost" size="sm" className="mt-4 w-full">
               <Link href="/dashboard/billing">
@@ -181,11 +239,25 @@ export default async function DashboardPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            {/* ここに最近のアクティビティのリストを表示します
-                現在はデモ用のプレースホルダーとして空のメッセージを表示します */}
-            <div className="text-center py-8 text-muted-foreground">
-              最近のアクティビティはありません
-            </div>
+            {isPremium ? (
+              <div className="space-y-4">
+                <div className="border rounded-md p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="font-medium">サブスクリプションを開始しました</p>
+                      <p className="text-sm text-muted-foreground">
+                        {new Date(subscriptionData.created).toLocaleDateString('ja-JP')}
+                      </p>
+                    </div>
+                    <Star className="h-5 w-5 text-yellow-500" />
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="text-center py-8 text-muted-foreground">
+                最近のアクティビティはありません
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>

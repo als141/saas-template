@@ -4,9 +4,15 @@ import { DashboardShell } from "@/app/dashboard/dashboard-shell";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { currentUser } from "@clerk/nextjs/server";
-import { supabase } from "@/lib/supabase/client";
-import { formatDate, formatPrice } from "@/lib/utils";
+import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { formatPrice } from "@/lib/utils";
 import { CreditCard, ExternalLink } from "lucide-react";
+
+// 価格表示用のヘルパー関数
+function displayPrice(amount: number | null | undefined): string {
+  if (amount === null || amount === undefined) return "無料";
+  return formatPrice(amount);
+}
 
 export default async function BillingPage() {
   const user = await currentUser();
@@ -15,18 +21,87 @@ export default async function BillingPage() {
     redirect("/sign-in");
   }
 
-  // サブスクリプション情報を取得
-  const { data: subscriptionData } = await supabase
+  // サーバーサイドでSupabaseクライアントを作成
+  const supabase = createServerSupabaseClient();
+
+  console.log("Fetching subscription data for user:", user.id);
+
+  // テーブルが存在するかチェック
+  try {
+    // 製品と価格データを取得
+    const { data: prices, error: pricesError } = await supabase
+      .from("prices")
+      .select("*");
+
+    if (pricesError) {
+      console.error("Prices query error:", pricesError);
+    } else {
+      console.log("Prices data:", prices);
+    }
+    
+    // データの存在を検証
+    const { data: subs, error: subsError } = await supabase
+      .from("subscriptions")
+      .select("*");
+      
+    if (subsError) {
+      console.error("Subscriptions query error:", subsError);
+    } else {
+      console.log(`Found ${subs?.length || 0} subscription records`);
+    }
+  } catch (err) {
+    console.error("Database check error:", err);
+  }
+
+  // サブスクリプション情報を直接取得
+  const { data: directSubscription, error: directError } = await supabase
     .from("subscriptions")
-    .select("*, prices(*)")
+    .select("*")
+    .eq("user_id", user.id)
+    .eq("status", "active");
+    
+  if (directError) {
+    console.error("Direct subscription query error:", directError);
+  } else {
+    console.log("Direct subscription data:", directSubscription);
+  }
+
+  // サブスクリプション情報を取得
+  const { data: subscriptionData, error: subscriptionError } = await supabase
+    .from("subscriptions")
+    .select("*")
     .eq("user_id", user.id)
     .eq("status", "active")
     .single();
 
-  const isSubscribed = !!subscriptionData;
+  if (subscriptionError) {
+    console.error("Subscription data error:", subscriptionError);
+  }
+
+  // 価格情報を別途取得
+  let priceData = null;
+  if (subscriptionData?.price_id) {
+    const { data: price, error: priceError } = await supabase
+      .from("prices")
+      .select("*")
+      .eq("id", subscriptionData.price_id)
+      .single();
+      
+    if (priceError) {
+      console.error("Price data error:", priceError);
+    } else {
+      priceData = price;
+      console.log("Price data:", priceData);
+    }
+  }
+
+  // 有効なサブスクリプションが存在するか確認
+  const isSubscribed = !!subscriptionData && !!priceData;
 
   // クライアントサイドの日本時間に変換する関数
   const toLocalDate = (dateString: string) => {
+    if (!dateString) return "日付が設定されていません";
+    
     return new Date(dateString).toLocaleString('ja-JP', {
       timeZone: 'Asia/Tokyo',
       year: 'numeric',
@@ -51,6 +126,13 @@ export default async function BillingPage() {
         </Button>
       </DashboardHeader>
 
+      {subscriptionError && (
+        <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 rounded-lg p-4 mb-6">
+          <p className="font-medium">サブスクリプション情報の取得中にエラーが発生しました</p>
+          <p className="text-sm">データベースのセットアップを確認してください: {subscriptionError.message}</p>
+        </div>
+      )}
+
       <div className="grid gap-8">
         <Card>
           <CardHeader>
@@ -64,10 +146,10 @@ export default async function BillingPage() {
               <>
                 <div className="flex items-center justify-between">
                   <div className="space-y-1">
-                    <p className="font-medium text-lg">{subscriptionData.prices.description || "有料プラン"}</p>
+                    <p className="font-medium text-lg">{priceData?.description || "有料プラン"}</p>
                     <p className="text-muted-foreground">
-                      {formatPrice((subscriptionData.prices.unit_amount || 0) / 100)}{" "}
-                      / {subscriptionData.prices.interval === "month" ? "月" : "年"}
+                      {displayPrice(priceData?.unit_amount)}{" "}
+                      / {priceData?.interval === "month" ? "月" : "年"}
                     </p>
                   </div>
                   <div className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100 px-3 py-1 rounded-full text-sm">
@@ -150,7 +232,7 @@ export default async function BillingPage() {
                     <div>
                       <p>{toLocalDate(subscriptionData.current_period_start)}</p>
                       <p className="text-sm text-muted-foreground">
-                        {formatPrice((subscriptionData.prices.unit_amount || 0) / 100)}
+                        {displayPrice(priceData?.unit_amount)}
                       </p>
                     </div>
                     <div className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100 px-3 py-1 rounded-full text-sm">

@@ -1,5 +1,8 @@
+-- 拡張機能のインストール (UUIDを扱うため)
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
 -- ユーザーテーブル
-CREATE TABLE IF NOT EXISTS users (
+CREATE TABLE IF NOT EXISTS public.users (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   clerk_id TEXT UNIQUE NOT NULL,
   email TEXT UNIQUE NOT NULL,
@@ -13,7 +16,7 @@ CREATE TABLE IF NOT EXISTS users (
 );
 
 -- 製品テーブル
-CREATE TABLE IF NOT EXISTS products (
+CREATE TABLE IF NOT EXISTS public.products (
   id TEXT PRIMARY KEY,
   active BOOLEAN DEFAULT TRUE,
   name TEXT NOT NULL,
@@ -23,9 +26,9 @@ CREATE TABLE IF NOT EXISTS products (
 );
 
 -- 料金テーブル
-CREATE TABLE IF NOT EXISTS prices (
+CREATE TABLE IF NOT EXISTS public.prices (
   id TEXT PRIMARY KEY,
-  product_id TEXT REFERENCES products(id),
+  product_id TEXT REFERENCES public.products(id),
   active BOOLEAN DEFAULT TRUE,
   description TEXT,
   unit_amount BIGINT,
@@ -38,7 +41,7 @@ CREATE TABLE IF NOT EXISTS prices (
 );
 
 -- サブスクリプションテーブル
-CREATE TABLE IF NOT EXISTS subscriptions (
+CREATE TABLE IF NOT EXISTS public.subscriptions (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL,
   status TEXT NOT NULL,
@@ -58,30 +61,55 @@ CREATE TABLE IF NOT EXISTS subscriptions (
 );
 
 -- インデックスの作成
-CREATE INDEX IF NOT EXISTS subscriptions_user_id_idx ON subscriptions(user_id);
-CREATE INDEX IF NOT EXISTS subscriptions_status_idx ON subscriptions(status);
-CREATE INDEX IF NOT EXISTS users_clerk_id_idx ON users(clerk_id);
+CREATE INDEX IF NOT EXISTS subscriptions_user_id_idx ON public.subscriptions(user_id);
+CREATE INDEX IF NOT EXISTS subscriptions_status_idx ON public.subscriptions(status);
+CREATE INDEX IF NOT EXISTS users_clerk_id_idx ON public.users(clerk_id);
+
+-- pricesテーブルとsubscriptionsテーブルの間に外部キー制約を追加
+ALTER TABLE public.subscriptions 
+  ADD CONSTRAINT fk_subscriptions_price FOREIGN KEY (price_id) REFERENCES public.prices(id);
 
 -- RLSポリシーの設定
-ALTER TABLE users ENABLE ROW LEVEL SECURITY;
-ALTER TABLE subscriptions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.subscriptions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.products ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.prices ENABLE ROW LEVEL SECURITY;
 
 -- サービスロールのポリシー（管理用）
 CREATE POLICY "Service can do all on users" 
-  ON users FOR ALL 
+  ON public.users FOR ALL 
   USING (true)
   WITH CHECK (true);
 
 CREATE POLICY "Service can do all on subscriptions" 
-  ON subscriptions FOR ALL 
+  ON public.subscriptions FOR ALL 
+  USING (true)
+  WITH CHECK (true);
+
+CREATE POLICY "Service can do all on products" 
+  ON public.products FOR ALL 
+  USING (true)
+  WITH CHECK (true);
+
+CREATE POLICY "Service can do all on prices" 
+  ON public.prices FOR ALL 
   USING (true)
   WITH CHECK (true);
 
 -- 認証済みユーザーのポリシー（自分のデータのみ）
 CREATE POLICY "Users can view their own data"
-  ON users FOR SELECT
+  ON public.users FOR SELECT
   USING (auth.uid()::text = clerk_id);
 
 CREATE POLICY "Users can view their own subscriptions"
-  ON subscriptions FOR SELECT
+  ON public.subscriptions FOR SELECT
   USING (user_id = auth.uid()::text);
+
+-- 製品と価格は全ユーザーが見られるようにする
+CREATE POLICY "Anyone can view products"
+  ON public.products FOR SELECT
+  USING (true);
+
+CREATE POLICY "Anyone can view prices"
+  ON public.prices FOR SELECT
+  USING (true);

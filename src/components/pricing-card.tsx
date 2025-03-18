@@ -40,6 +40,8 @@ export function PricingCard({
         return;
       }
 
+      console.log(`Subscribing to plan: ${name} (${priceId})`);
+
       // Stripe Checkoutセッションを作成するAPIを呼び出し
       const response = await fetch("/api/checkout", {
         method: "POST",
@@ -51,19 +53,32 @@ export function PricingCard({
         }),
       });
 
+      if (!response.ok) {
+        const errorData = await response.json();
+        toast.error(errorData.error || "エラーが発生しました");
+        setIsLoading(false);
+        return;
+      }
+
       const data = await response.json();
 
       if (data.error) {
         toast.error(data.error);
+        setIsLoading(false);
         return;
       }
 
       // Stripe Checkoutページにリダイレクト
-      router.push(data.url);
+      if (data.url) {
+        console.log(`Redirecting to checkout: ${data.url}`);
+        router.push(data.url);
+      } else {
+        toast.error("チェックアウトURLが見つかりません");
+        setIsLoading(false);
+      }
     } catch (error) {
-      console.error(error);
+      console.error("Checkout error:", error);
       toast.error("エラーが発生しました。もう一度お試しください。");
-    } finally {
       setIsLoading(false);
     }
   };

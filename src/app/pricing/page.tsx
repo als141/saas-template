@@ -18,39 +18,88 @@ interface Product {
 }
 
 async function getProductsAndPrices(): Promise<Product[]> {
-  const products = await stripe.products.list({
-    active: true,
-    expand: ["data.default_price"],
-  });
-
-  return products.data
-    .sort((a, b) => {
-      const priceA = ((a.default_price as Stripe.Price)?.unit_amount || 0);
-      const priceB = ((b.default_price as Stripe.Price)?.unit_amount || 0);
-      return priceA - priceB;
-    })
-    .map((product) => {
-      const price = product.default_price as Stripe.Price;
-      return {
-        id: product.id,
-        name: product.name,
-        description: product.description,
-        price: price.unit_amount ? formatPrice(price.unit_amount / 100) : null,
-        priceId: price.id,
-        interval: price.type === "recurring" ? (price.recurring?.interval ?? null) : null,
-        features: (product.metadata.features || "").split(","),
-      };
+  try {
+    const products = await stripe.products.list({
+      active: true,
+      expand: ["data.default_price"],
     });
+
+    console.log("Products from Stripe:", JSON.stringify(products.data, null, 2));
+
+    return products.data
+      .sort((a, b) => {
+        const priceA = ((a.default_price as Stripe.Price)?.unit_amount || 0);
+        const priceB = ((b.default_price as Stripe.Price)?.unit_amount || 0);
+        return priceA - priceB;
+      })
+      .map((product) => {
+        const price = product.default_price as Stripe.Price;
+        
+        console.log(`Product ${product.id} price: ${price.unit_amount}`);
+        
+        // メタデータからフィーチャーを取得
+        let features = [];
+        if (product.metadata && product.metadata.features) {
+          features = product.metadata.features.split(",").map(f => f.trim());
+        } else {
+          // デフォルトのフィーチャー
+          features = ["基本機能"];
+          
+          // プラン名に基づいて機能を推測
+          if (product.name.toLowerCase().includes("plus")) {
+            features.push("優先サポート", "拡張機能");
+          } else if (product.name.toLowerCase().includes("pro")) {
+            features.push("優先サポート", "拡張機能", "高度な分析");
+          } else if (product.name.toLowerCase().includes("elite")) {
+            features.push("24時間サポート", "すべての機能", "高度な分析", "カスタムインテグレーション");
+          }
+        }
+        
+        return {
+          id: product.id,
+          name: product.name,
+          description: product.description,
+          price: formatPrice(price.unit_amount || 0),
+          priceId: price.id,
+          interval: price.type === "recurring" ? (price.recurring?.interval ?? null) : null,
+          features: features,
+        };
+      });
+  } catch (error) {
+    console.error("Error fetching products:", error);
+    return [];
+  }
 }
 
 export default async function PricingPage() {
   const plans = await getProductsAndPrices();
+
+  // URLパラメータをチェック
+  const searchParams = new URL(globalThis.location?.href || "http://localhost").searchParams;
+  const notice = searchParams.get("notice");
+  const canceled = searchParams.get("canceled") === "true";
 
   return (
     <div className="flex min-h-screen flex-col">
       <Navbar />
       <main className="flex-1 py-16">
         <div className="container mx-auto px-4">
+          {notice === "premium_required" && (
+            <div className="mb-8 bg-yellow-50 border-l-4 border-yellow-400 p-4 rounded-md">
+              <p className="text-yellow-700">
+                この機能にアクセスするには、プレミアムプランへのアップグレードが必要です。
+              </p>
+            </div>
+          )}
+
+          {canceled && (
+            <div className="mb-8 bg-blue-50 border-l-4 border-blue-400 p-4 rounded-md">
+              <p className="text-blue-700">
+                チェックアウトがキャンセルされました。引き続き現在のプランをご利用いただけます。
+              </p>
+            </div>
+          )}
+
           <div className="text-center mb-16">
             <h1 className="text-4xl font-bold tracking-tight mb-4">シンプルで透明な料金プラン</h1>
             <p className="text-lg text-gray-600 dark:text-gray-300 max-w-2xl mx-auto">
@@ -59,17 +108,29 @@ export default async function PricingPage() {
           </div>
 
           <div className="grid md:grid-cols-3 gap-8 max-w-5xl mx-auto">
-            {plans.map((plan) => (
-              <PricingCard
-                key={plan.id}
-                name={plan.name}
-                description={plan.description || ""}
-                price={plan.price || ""}
-                interval={plan.interval || ""}
-                features={plan.features}
-                priceId={plan.priceId}
-              />
-            ))}
+            {plans.length > 0 ? (
+              plans.map((plan) => (
+                <PricingCard
+                  key={plan.id}
+                  name={plan.name}
+                  description={plan.description || ""}
+                  price={plan.price || ""}
+                  interval={plan.interval || ""}
+                  features={plan.features}
+                  priceId={plan.priceId}
+                  popular={plan.name.toLowerCase().includes("pro") || plan.name.toLowerCase().includes("plus")}
+                />
+              ))
+            ) : (
+              <div className="col-span-3 text-center py-12">
+                <p className="text-muted-foreground">
+                  プランの読み込み中にエラーが発生しました。もう一度お試しください。
+                </p>
+                <Button className="mt-4" onClick={() => window.location.reload()}>
+                  再読み込み
+                </Button>
+              </div>
+            )}
           </div>
 
           <div className="mt-20 text-center">

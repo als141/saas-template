@@ -3,13 +3,29 @@ import { NextResponse } from "next/server";
 import { stripe } from "@/lib/stripe/client";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 
+/**
+ * ClerkのユーザーIDからSupabaseユーザーIDを取得するユーティリティ
+ */
+async function getSupabaseUserId(supabase: any, clerkId: string): Promise<string | null> {
+  const { data: userRecord, error } = await supabase
+    .from("users")
+    .select("id")
+    .eq("clerk_id", clerkId)
+    .single();
+  
+  if (error || !userRecord) {
+    return null;
+  }
+  return userRecord.id;
+}
+
 export async function GET(req: Request) {
   try {
     const authResult = await auth();
-    const userId = authResult.userId;
-    const user = await currentUser();
+    const clerkUserId = authResult.userId;
+    const clerkUser = await currentUser();
 
-    if (!userId || !user) {
+    if (!clerkUserId || !clerkUser) {
       return NextResponse.json(
         { error: "認証が必要です" },
         { status: 401 }
@@ -19,11 +35,20 @@ export async function GET(req: Request) {
     // サーバーサイドでSupabaseクライアントを作成
     const supabase = createServerSupabaseClient();
 
+    // SupabaseユーザーIDを取得
+    const supabaseUserId = await getSupabaseUserId(supabase, clerkUserId);
+    if (!supabaseUserId) {
+      return NextResponse.json(
+        { error: "ユーザーが見つかりません" },
+        { status: 404 }
+      );
+    }
+
     // サブスクリプション情報を取得
     const { data: subscriptionData, error: subscriptionError } = await supabase
       .from("subscriptions")
       .select("*")
-      .eq("user_id", userId)
+      .eq("user_id", supabaseUserId)
       .eq("status", "active")
       .single();
 
@@ -45,7 +70,6 @@ export async function GET(req: Request) {
     const url = new URL(req.url);
     const redirectTo = url.searchParams.get("redirect");
 
-    // customer_idが存在することを確認
     if (!subscriptionData.customer_id) {
       console.error("No customer_id found in subscription data");
       return NextResponse.json(

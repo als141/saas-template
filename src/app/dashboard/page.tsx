@@ -9,6 +9,24 @@ import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { ArrowRight, CreditCard, Settings, HelpCircle, Star } from "lucide-react";
 
+/**
+ * SupabaseユーザーIDを取得する
+ */
+async function getSupabaseUser(supabase: any, clerkUserId: string) {
+  const { data: userData, error: userError } = await supabase
+    .from("users")
+    .select("*")
+    .eq("clerk_id", clerkUserId)
+    .single();
+
+  if (userError) {
+    console.log("User query error:", userError);
+    return null;
+  }
+
+  return userData;
+}
+
 // 価格表示用のヘルパー関数
 function displayPrice(amount: number | null | undefined): string {
   if (amount === null || amount === undefined) return "無料";
@@ -16,69 +34,60 @@ function displayPrice(amount: number | null | undefined): string {
 }
 
 export default async function DashboardPage() {
-  const user = await currentUser();
+  const clerkUser = await currentUser();
 
-  if (!user) {
+  if (!clerkUser) {
     redirect("/sign-in");
   }
 
   // サーバーサイドでSupabaseクライアントを作成
   const supabase = createServerSupabaseClient();
 
-  // テーブルが存在するかチェック
-  try {
-    // 製品と価格データを取得
-    const { data: prices, error: pricesError } = await supabase
-      .from("prices")
-      .select("*");
-
-    if (pricesError) {
-      console.error("Prices query error:", pricesError);
-    } else {
-      console.log("Prices data:", prices);
-    }
-  } catch (err) {
-    console.error("Database check error:", err);
+  // Clerk ID から Supabaseユーザーを取得
+  const supabaseUser = await getSupabaseUser(supabase, clerkUser.id);
+  if (!supabaseUser) {
+    // ユーザーがまだ Supabase に作成されていない場合、ダッシュボードを表示しても
+    // サブスクリプションはない想定
   }
 
-  // サブスクリプション情報を取得
-  const { data: subscriptionData, error: subscriptionError } = await supabase
-    .from("subscriptions")
-    .select("*, prices(*)")
-    .eq("user_id", user.id)
-    .eq("status", "active")
-    .single();
+  // サブスクリプションを取得 (SupabaseユーザーIDがある場合に限る)
+  let subscriptionData: any = null;
+  let subscriptionError: any = null;
+  let isPremium = false;
 
-  if (subscriptionError) {
-    console.log("Subscription query error:", subscriptionError);
-  } else {
-    console.log("Subscription data:", subscriptionData);
+  if (supabaseUser) {
+    const { data, error } = await supabase
+      .from("subscriptions")
+      .select("*, prices(*)")
+      .eq("user_id", supabaseUser.id)
+      .eq("status", "active")
+      .single();
+    
+    subscriptionData = data;
+    subscriptionError = error;
+    isPremium = !!subscriptionData;
   }
 
-  const isPremium = !!subscriptionData;
-
-  // ユーザー情報をSupabaseから取得
-  const { data: userData, error: userError } = await supabase
-    .from("users")
-    .select("*")
-    .eq("clerk_id", user.id)
-    .single();
-
-  if (userError) {
-    console.log("User query error:", userError);
-  } else {
-    console.log("User data:", userData);
-  }
+  // ダッシュボード上で表示するユーザーデータも取得
+  // supabaseUser がない場合は未登録扱い
+  // supabaseUser の内容をそのまま使う
+  const userData = supabaseUser || null;
 
   // 成功パラメータがある場合（サブスクリプション購入後など）
-  const searchParams = new URL(globalThis.location?.href || "http://localhost").searchParams;
-  const success = searchParams.get("success") === "true";
+  // SSRでは "globalThis.location" がない場合もあるので一時的にエラー回避
+  let success = false;
+  try {
+    const searchParams = new URL(globalThis.location?.href || "http://localhost").searchParams;
+    success = searchParams.get("success") === "true";
+  } catch (e) {
+    // ignore
+  }
 
   return (
     <DashboardShell>
       <DashboardHeader
         heading="ダッシュボード"
-        text={`こんにちは、${user.firstName || "ようこそ"}! アカウントの概要です。`}
+        text={`こんにちは、${clerkUser.firstName || "ようこそ"}! アカウントの概要です。`}
       >
         {isPremium ? (
           <Button asChild>
@@ -246,7 +255,9 @@ export default async function DashboardPage() {
                     <div>
                       <p className="font-medium">サブスクリプションを開始しました</p>
                       <p className="text-sm text-muted-foreground">
-                        {new Date(subscriptionData.created).toLocaleDateString('ja-JP')}
+                        {subscriptionData && subscriptionData.created
+                          ? new Date(subscriptionData.created).toLocaleDateString("ja-JP")
+                          : ""}
                       </p>
                     </div>
                     <Star className="h-5 w-5 text-yellow-500" />

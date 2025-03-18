@@ -7,19 +7,36 @@ import { currentUser } from "@clerk/nextjs/server";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { Lock, Unlock, Download, Share, Star } from "lucide-react";
 
-export default async function PremiumFeaturePage() {
-  const user = await currentUser();
+async function getSupabaseUser(supabase: any, clerkUserId: string) {
+  const { data, error } = await supabase
+    .from("users")
+    .select("id")
+    .eq("clerk_id", clerkUserId)
+    .single();
 
-  if (!user) {
+  if (error || !data) return null;
+  return data;
+}
+
+export default async function PremiumFeaturePage() {
+  const clerkUser = await currentUser();
+
+  if (!clerkUser) {
     redirect("/sign-in");
   }
 
   // サーバー側でサブスクリプションの確認
   const supabase = createServerSupabaseClient();
+  const supabaseUser = await getSupabaseUser(supabase, clerkUser.id);
+  if (!supabaseUser) {
+    // そもそもユーザーが存在しない = サブスクない
+    redirect("/pricing?notice=premium_required");
+  }
+
   const { data: subscription } = await supabase
     .from("subscriptions")
     .select("*")
-    .eq("user_id", user.id)
+    .eq("user_id", supabaseUser.id)
     .eq("status", "active")
     .single();
 
@@ -92,7 +109,7 @@ export default async function PremiumFeaturePage() {
           <CardFooter className="border-t pt-6">
             <div className="flex items-center space-x-2 text-sm text-muted-foreground">
               <Star className="h-4 w-4 text-yellow-500" />
-              <span>現在、{subscription?.prices?.description || "プレミアム"}プランをご利用中です</span>
+              <span>現在、{subscription?.price_id}プランをご利用中です</span>
             </div>
           </CardFooter>
         </Card>

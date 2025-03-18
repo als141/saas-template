@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { DashboardHeader } from "@/app/dashboard/dashboard-header";
 import { DashboardShell } from "@/app/dashboard/dashboard-shell";
 import { currentUser } from "@clerk/nextjs/server";
-import { supabase } from "@/lib/supabase/client";
+import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { UserSettingsForm } from "@/app/dashboard/user-settings-form";
@@ -10,32 +10,42 @@ import { NotificationsForm } from "@/app/dashboard/notifications-form";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { formatDate } from "@/lib/utils";
 
-export default async function SettingsPage() {
-  const user = await currentUser();
+async function getSupabaseUser(supabase: any, clerkUserId: string) {
+  const { data, error } = await supabase
+    .from("users")
+    .select("*")
+    .eq("clerk_id", clerkUserId)
+    .single();
 
-  if (!user) {
+  if (error) {
+    return null;
+  }
+
+  return data;
+}
+
+export default async function SettingsPage() {
+  const clerkUser = await currentUser();
+
+  if (!clerkUser) {
     redirect("/sign-in");
   }
 
   // Supabaseからユーザー情報を取得
-  const { data: userData } = await supabase
-    .from("users")
-    .select("*")
-    .eq("clerk_id", user.id)
-    .single();
+  const supabase = createServerSupabaseClient();
+  const userData = await getSupabaseUser(supabase, clerkUser.id);
 
-  // クライアントコンポーネントに渡すためのシリアライズ可能な平坦なユーザーデータを作成
+  // シリアライズ可能なユーザーデータを生成
   const serializedUser = {
-    id: user.id,
-    firstName: user.firstName,
-    lastName: user.lastName,
-    fullName: `${user.firstName || ''} ${user.lastName || ''}`.trim(),
-    email: user.emailAddresses[0]?.emailAddress || '',
-    imageUrl: user.imageUrl,
-    createdAt: user.createdAt ? new Date(user.createdAt).toISOString() : undefined
+    id: clerkUser.id,
+    firstName: clerkUser.firstName,
+    lastName: clerkUser.lastName,
+    fullName: `${clerkUser.firstName || ''} ${clerkUser.lastName || ''}`.trim(),
+    email: clerkUser.emailAddresses[0]?.emailAddress || '',
+    imageUrl: clerkUser.imageUrl,
+    createdAt: clerkUser.createdAt ? new Date(clerkUser.createdAt).toISOString() : undefined
   };
 
-  // シリアライズ可能なユーザーデータ
   const serializedUserData = userData ? {
     ...userData,
     notification_preferences: userData.notification_preferences || {
@@ -72,17 +82,19 @@ export default async function SettingsPage() {
             <CardContent className="space-y-6">
               <div className="flex flex-col sm:flex-row gap-6">
                 <Avatar className="h-20 w-20">
-                  <AvatarImage src={user.imageUrl} alt={user.username || ""} />
+                  <AvatarImage src={clerkUser.imageUrl} alt={clerkUser.username || ""} />
                   <AvatarFallback>
-                    {user.firstName?.charAt(0)}
-                    {user.lastName?.charAt(0)}
+                    {clerkUser.firstName?.charAt(0)}
+                    {clerkUser.lastName?.charAt(0)}
                   </AvatarFallback>
                 </Avatar>
                 <div className="space-y-1">
-                  <h3 className="font-medium text-lg">{user.firstName} {user.lastName}</h3>
-                  <p className="text-sm text-muted-foreground">{user.emailAddresses[0].emailAddress}</p>
+                  <h3 className="font-medium text-lg">
+                    {clerkUser.firstName} {clerkUser.lastName}
+                  </h3>
+                  <p className="text-sm text-muted-foreground">{clerkUser.emailAddresses[0].emailAddress}</p>
                   <p className="text-sm text-muted-foreground">
-                    登録日: {formatDate(userData?.created_at || new Date().toISOString())}
+                    登録日: {userData?.created_at ? formatDate(userData.created_at) : "不明"}
                   </p>
                 </div>
               </div>

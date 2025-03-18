@@ -27,8 +27,18 @@ const formSchema = z.object({
   }),
 });
 
+interface SerializedUser {
+  id: string;
+  firstName?: string | null;
+  lastName?: string | null;
+  fullName: string;
+  email: string;
+  imageUrl?: string;
+  createdAt?: string;
+}
+
 interface UserSettingsFormProps {
-  user: any;
+  user: SerializedUser;
   userData: any;
 }
 
@@ -39,8 +49,8 @@ export function UserSettingsForm({ user, userData }: UserSettingsFormProps) {
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
     defaultValues: {
-      name: `${user.firstName || ""} ${user.lastName || ""}`.trim() || "",
-      email: user.emailAddresses[0].emailAddress || "",
+      name: user.fullName || "",
+      email: user.email || "",
     },
   });
 

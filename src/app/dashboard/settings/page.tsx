@@ -24,6 +24,28 @@ export default async function SettingsPage() {
     .eq("clerk_id", user.id)
     .single();
 
+  // クライアントコンポーネントに渡すためのシリアライズ可能な平坦なユーザーデータを作成
+  const serializedUser = {
+    id: user.id,
+    firstName: user.firstName,
+    lastName: user.lastName,
+    fullName: `${user.firstName || ''} ${user.lastName || ''}`.trim(),
+    email: user.emailAddresses[0]?.emailAddress || '',
+    imageUrl: user.imageUrl,
+    createdAt: user.createdAt ? new Date(user.createdAt).toISOString() : undefined
+  };
+
+  // シリアライズ可能なユーザーデータ
+  const serializedUserData = userData ? {
+    ...userData,
+    notification_preferences: userData.notification_preferences || {
+      marketingEmails: false,
+      securityEmails: true,
+      serviceUpdates: true,
+      billingAlerts: true
+    }
+  } : null;
+
   return (
     <DashboardShell>
       <DashboardHeader
@@ -64,7 +86,7 @@ export default async function SettingsPage() {
                   </p>
                 </div>
               </div>
-              <UserSettingsForm user={user} userData={userData} />
+              <UserSettingsForm user={serializedUser} userData={serializedUserData} />
             </CardContent>
           </Card>
         </TabsContent>
@@ -78,7 +100,7 @@ export default async function SettingsPage() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <NotificationsForm user={user} userData={userData} />
+              <NotificationsForm user={serializedUser} userData={serializedUserData} />
             </CardContent>
           </Card>
         </TabsContent>

@@ -24,8 +24,18 @@ const formSchema = z.object({
   billingAlerts: z.boolean().default(true),
 });
 
+interface SerializedUser {
+  id: string;
+  firstName?: string | null;
+  lastName?: string | null;
+  fullName: string;
+  email: string;
+  imageUrl?: string;
+  createdAt?: string;
+}
+
 interface NotificationsFormProps {
-  user: any;
+  user: SerializedUser;
   userData: any;
 }
 

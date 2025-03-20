@@ -1,7 +1,7 @@
 import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server';
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { supabase } from '@/lib/supabase/client';
+import { createServerSupabaseClient } from '@/lib/supabase/server';
 
 // プレミアム機能へのアクセスに必要なページのパス
 const PREMIUM_PATHS = [
@@ -10,15 +10,36 @@ const PREMIUM_PATHS = [
   "/dashboard/export",
 ];
 
-async function hasActiveSubscription(userId: string) {
-  const { data } = await supabase
-    .from("subscriptions")
-    .select("*")
-    .eq("user_id", userId)
-    .eq("status", "active")
-    .single();
-
-  return !!data;
+// 正しい方法でサブスクリプションを確認する
+async function hasActiveSubscription(clerkUserId: string) {
+  try {
+    const supabase = createServerSupabaseClient();
+    
+    // まず、Clerk IDからSupabaseのユーザーIDを取得
+    const { data: userData, error: userError } = await supabase
+      .from("users")
+      .select("id")
+      .eq("clerk_id", clerkUserId)
+      .single();
+    
+    if (userError || !userData) {
+      console.error("User query error:", userError);
+      return false;
+    }
+    
+    // 次に、SupabaseユーザーIDを使用してサブスクリプションを確認
+    const { data: subscriptionData } = await supabase
+      .from("subscriptions")
+      .select("*")
+      .eq("user_id", userData.id)
+      .eq("status", "active")
+      .single();
+    
+    return !!subscriptionData;
+  } catch (error) {
+    console.error("Subscription check error:", error);
+    return false;
+  }
 }
 
 export default clerkMiddleware(async (auth, req: NextRequest) => {

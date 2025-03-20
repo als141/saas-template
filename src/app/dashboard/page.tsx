@@ -10,18 +10,40 @@ import Link from "next/link";
 import { ArrowRight, CreditCard, Settings, HelpCircle, Star } from "lucide-react";
 
 /**
- * SupabaseユーザーIDを取得する
+ * SupabaseユーザーIDを取得する（なければ作成する）
  */
-async function getSupabaseUser(supabase: any, clerkUserId: string) {
+async function getOrCreateSupabaseUser(supabase: any, clerkUser: any) {
+  // Clerk IDからSupabaseユーザーを検索
   const { data: userData, error: userError } = await supabase
     .from("users")
     .select("*")
-    .eq("clerk_id", clerkUserId)
+    .eq("clerk_id", clerkUser.id)
     .single();
 
   if (userError) {
     console.log("User query error:", userError);
-    return null;
+    
+    // ユーザーが存在しない場合は新規作成
+    const { data: newUser, error: createError } = await supabase
+      .from("users")
+      .insert({
+        clerk_id: clerkUser.id,
+        email: clerkUser.emailAddresses[0]?.emailAddress || `user-${clerkUser.id}@example.com`,
+        name: `${clerkUser.firstName || ''} ${clerkUser.lastName || ''}`.trim() || `User ${clerkUser.id}`,
+        avatar_url: clerkUser.imageUrl,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .select("*")
+      .single();
+
+    if (createError) {
+      console.error("Failed to create Supabase user:", createError);
+      return null;
+    }
+    
+    console.log("Created new Supabase user:", newUser);
+    return newUser;
   }
 
   return userData;
@@ -43,35 +65,45 @@ export default async function DashboardPage() {
   // サーバーサイドでSupabaseクライアントを作成
   const supabase = createServerSupabaseClient();
 
-  // Clerk ID から Supabaseユーザーを取得
-  const supabaseUser = await getSupabaseUser(supabase, clerkUser.id);
-  if (!supabaseUser) {
-    // ユーザーがまだ Supabase に作成されていない場合、ダッシュボードを表示しても
-    // サブスクリプションはない想定
-  }
+  // Clerk ID から Supabaseユーザーを取得または作成
+  const supabaseUser = await getOrCreateSupabaseUser(supabase, clerkUser);
+  
+    // サブスクリプションを取得 (SupabaseユーザーIDがある場合に限る)
+    let subscriptionData: any = null;
+    let subscriptionError: any = null;
+    let isPremium = false;
 
-  // サブスクリプションを取得 (SupabaseユーザーIDがある場合に限る)
-  let subscriptionData: any = null;
-  let subscriptionError: any = null;
-  let isPremium = false;
-
-  if (supabaseUser) {
-    const { data, error } = await supabase
-      .from("subscriptions")
-      .select("*, prices(*)")
-      .eq("user_id", supabaseUser.id)
-      .eq("status", "active")
-      .single();
+    if (supabaseUser) {
+    console.log(`Fetching subscription for Supabase user ID: ${supabaseUser.id}`);
     
-    subscriptionData = data;
-    subscriptionError = error;
-    isPremium = !!subscriptionData;
-  }
-
-  // ダッシュボード上で表示するユーザーデータも取得
-  // supabaseUser がない場合は未登録扱い
-  // supabaseUser の内容をそのまま使う
-  const userData = supabaseUser || null;
+    // まずデバッグのために全てのサブスクリプションを取得
+    const { data: allSubs, error: debugError } = await supabase
+        .from("subscriptions")
+        .select("*");
+        
+    if (debugError) {
+        console.error("Debug subscription query error:", debugError);
+    } else {
+        console.log(`Found ${allSubs.length} total subscriptions in database`);
+    }
+    
+    // このユーザーのサブスクリプションを取得
+    const { data, error } = await supabase
+        .from("subscriptions")
+        .select("*, prices(*)")
+        .eq("user_id", supabaseUser.id)
+        .eq("status", "active")
+        .maybeSingle();
+    
+    if (error) {
+        console.error("Subscription query error:", error);
+        subscriptionError = error;
+    } else {
+        console.log("Subscription data found:", data ? "Yes" : "No");
+        subscriptionData = data;
+        isPremium = !!subscriptionData;
+    }
+    }
 
   // 成功パラメータがある場合（サブスクリプション購入後など）
   // SSRでは "globalThis.location" がない場合もあるので一時的にエラー回避

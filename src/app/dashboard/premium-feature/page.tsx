@@ -7,15 +7,41 @@ import { currentUser } from "@clerk/nextjs/server";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { Lock, Unlock, Download, Share, Star } from "lucide-react";
 
-async function getSupabaseUser(supabase: any, clerkUserId: string) {
-  const { data, error } = await supabase
+// Clerk IDからSupabaseユーザー取得（なければ作成）
+async function getOrCreateSupabaseUser(supabase: any, clerkUser: any) {
+  // Clerk IDからSupabaseユーザーを検索
+  const { data: userData, error: userError } = await supabase
     .from("users")
-    .select("id")
-    .eq("clerk_id", clerkUserId)
+    .select("*")
+    .eq("clerk_id", clerkUser.id)
     .single();
 
-  if (error || !data) return null;
-  return data;
+  if (userError) {
+    console.log("User query error:", userError);
+    
+    // ユーザーが存在しない場合は新規作成
+    const { data: newUser, error: createError } = await supabase
+      .from("users")
+      .insert({
+        clerk_id: clerkUser.id,
+        email: clerkUser.emailAddresses[0]?.emailAddress || `user-${clerkUser.id}@example.com`,
+        name: `${clerkUser.firstName || ''} ${clerkUser.lastName || ''}`.trim() || `User ${clerkUser.id}`,
+        avatar_url: clerkUser.imageUrl,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .select("*")
+      .single();
+
+    if (createError) {
+      console.error("Failed to create Supabase user:", createError);
+      return null;
+    }
+    
+    return newUser;
+  }
+
+  return userData;
 }
 
 export default async function PremiumFeaturePage() {
@@ -27,18 +53,23 @@ export default async function PremiumFeaturePage() {
 
   // サーバー側でサブスクリプションの確認
   const supabase = createServerSupabaseClient();
-  const supabaseUser = await getSupabaseUser(supabase, clerkUser.id);
+  const supabaseUser = await getOrCreateSupabaseUser(supabase, clerkUser);
+  
   if (!supabaseUser) {
     // そもそもユーザーが存在しない = サブスクない
     redirect("/pricing?notice=premium_required");
   }
 
-  const { data: subscription } = await supabase
+  const { data: subscription, error } = await supabase
     .from("subscriptions")
     .select("*")
     .eq("user_id", supabaseUser.id)
     .eq("status", "active")
-    .single();
+    .maybeSingle();
+
+  if (error) {
+    console.error("Subscription query error:", error);
+  }
 
   const isPremium = !!subscription;
 

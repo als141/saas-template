@@ -19,13 +19,33 @@ export function useSubscription() {
       if (!userId || !isSignedIn) return null;
 
       // デバッグのために詳細なログを出力
-      console.log(`Fetching subscription for user: ${userId}`);
+      console.log(`Fetching subscription for user with Clerk ID: ${userId}`);
 
       try {
+        // まず、ClerkIDに対応するSupabaseのユーザーIDを取得
+        const { data: userData, error: userError } = await supabase
+          .from("users")
+          .select("id")
+          .eq("clerk_id", userId)
+          .single();
+          
+        if (userError) {
+          console.error("Supabaseユーザー取得エラー:", userError);
+          return null;
+        }
+        
+        if (!userData) {
+          console.log("Supabaseユーザーが見つかりません。サブスクリプションはありません。");
+          return null;
+        }
+        
+        console.log(`Found Supabase user ID: ${userData.id}, fetching subscription`);
+        
+        // 次に、SupabaseユーザーIDを使ってサブスクリプションを検索
         const { data, error } = await supabase
           .from("subscriptions")
           .select("*, prices(*)")
-          .eq("user_id", userId)
+          .eq("user_id", userData.id)
           .eq("status", "active")
           .maybeSingle();
   

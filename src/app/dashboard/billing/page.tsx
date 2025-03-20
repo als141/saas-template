@@ -16,106 +16,108 @@ function displayPrice(amount: number | null | undefined): string {
 
 // Clerk IDからSupabaseユーザー取得
 async function getSupabaseUser(supabase: any, clerkUserId: string) {
-    console.log(`Looking up Supabase user for Clerk ID: ${clerkUserId}`);
+  console.log(`Looking up Supabase user for Clerk ID: ${clerkUserId}`);
     
-    const { data, error } = await supabase
-      .from("users")
-      .select("*")
-      .eq("clerk_id", clerkUserId)
-      .single();
-  
-    if (error) {
-      console.error("Supabaseユーザー検索エラー:", error);
-      return null;
-    }
-  
-    console.log(`Found Supabase user: ${data.id}`);
-    return data;
+  const { data, error } = await supabase
+    .from("users")
+    .select("*")
+    .eq("clerk_id", clerkUserId)
+    .single();
+
+  if (error) {
+    console.error("Supabaseユーザー検索エラー:", error);
+    return null;
   }
-  
-  export default async function BillingPage() {
-    const clerkUser = await currentUser();
-  
-    if (!clerkUser) {
-      redirect("/sign-in");
+
+  console.log(`Found Supabase user: ${data.id}`);
+  return data;
+}
+
+export default async function BillingPage() {
+  const clerkUser = await currentUser();
+
+  if (!clerkUser) {
+    redirect("/sign-in");
+  }
+
+  const supabase = createServerSupabaseClient();
+  console.log("Fetching subscription data for clerkUserId:", clerkUser.id);
+
+  // SupabaseユーザーIDを取得（なければ作成）
+  let supabaseUser = await getSupabaseUser(supabase, clerkUser.id);
+
+  // ユーザーが存在しない場合は作成
+  if (!supabaseUser) {
+    console.log(`Creating Supabase user for Clerk ID: ${clerkUser.id}`);
+    const { data: newUser, error: createError } = await supabase
+      .from("users")
+      .insert({
+        clerk_id: clerkUser.id,
+        email: clerkUser.emailAddresses[0]?.emailAddress || `user-${clerkUser.id}@example.com`,
+        name: `${clerkUser.firstName || ""} ${clerkUser.lastName || ""}`.trim() || `User ${clerkUser.id}`,
+        avatar_url: clerkUser.imageUrl
+      })
+      .select("*")
+      .single();
+
+    if (createError) {
+      console.error("Failed to create Supabase user:", createError);
+    } else {
+      supabaseUser = newUser;
+      console.log(`Created new Supabase user: ${supabaseUser.id}`);
     }
-  
-    const supabase = createServerSupabaseClient();
-    console.log("Fetching subscription data for clerkUserId:", clerkUser.id);
-  
-    // SupabaseユーザーIDを取得（なければ作成）
-    let supabaseUser = await getSupabaseUser(supabase, clerkUser.id);
-  
-    // ユーザーが存在しない場合は作成
-    if (!supabaseUser) {
-      console.log(`Creating Supabase user for Clerk ID: ${clerkUser.id}`);
-      const { data: newUser, error: createError } = await supabase
-        .from("users")
-        .insert({
-          clerk_id: clerkUser.id,
-          email: clerkUser.emailAddresses[0]?.emailAddress || `user-${clerkUser.id}@example.com`,
-          name: `${clerkUser.firstName || ""} ${clerkUser.lastName || ""}`.trim() || `User ${clerkUser.id}`,
-          avatar_url: clerkUser.imageUrl
-        })
-        .select("*")
-        .single();
-  
-      if (createError) {
-        console.error("Failed to create Supabase user:", createError);
-      } else {
-        supabaseUser = newUser;
-        console.log(`Created new Supabase user: ${supabaseUser.id}`);
-      }
-    }
-  
-    let subscriptionData = null;
-    let priceData = null;
-    let subscriptionError = null;
-    let isSubscribed = false;
-  
-    if (supabaseUser) {
-      // デバッグ目的ですべてのサブスクリプションを一覧表示
-      const { data: allSubs } = await supabase
-        .from("subscriptions")
-        .select("*");
+  }
+
+  let subscriptionData = null;
+  let priceData = null;
+  let subscriptionError = null;
+  let isSubscribed = false;
+
+  if (supabaseUser) {
+    // デバッグ目的ですべてのサブスクリプションを一覧表示
+    const { data: allSubs } = await supabase
+      .from("subscriptions")
+      .select("*");
         
-      console.log(`Found ${allSubs?.length || 0} total subscriptions in database`);
+    console.log(`Found ${allSubs?.length || 0} total subscriptions in database`);
       
-      // サブスクリプション情報を取得
-      const { data: sub, error: subError } = await supabase
-        .from("subscriptions")
-        .select("*")
-        .eq("user_id", supabaseUser.id)
-        .eq("status", "active")
-        .maybeSingle(); // .single()の代わりにmaybeSingleを使用
-  
-      if (subError) {
-        console.error("Subscription data error:", subError);
-        subscriptionError = subError;
-      } else {
-        subscriptionData = sub;
-        isSubscribed = !!sub;
-        console.log("Active subscription found:", isSubscribed ? "Yes" : "No");
-        
-        if (subscriptionData) {
-          console.log("Subscription details:", JSON.stringify(subscriptionData, null, 2));
-        }
-      }
-  
-      // 価格情報を取得
+    // サブスクリプション情報を取得（最新1件のみ）
+    const { data: sub, error: subError } = await supabase
+      .from("subscriptions")
+      .select("*")
+      .eq("user_id", supabaseUser.id)
+      .eq("status", "active")
+      .order("created", { ascending: false })
+      .limit(1)
+      .maybeSingle(); // ここで複数行あっても最新1行だけ返す
+
+    if (subError) {
+      console.error("Subscription data error:", subError);
+      subscriptionError = subError;
+    } else {
+      subscriptionData = sub;
+      isSubscribed = !!sub;
+      console.log("Active subscription found:", isSubscribed ? "Yes" : "No");
+      
       if (subscriptionData) {
-        const { data: price, error: priceError } = await supabase
-          .from("prices")
-          .select("*")
-          .eq("id", subscriptionData.price_id)
-          .single();
-        if (priceError) {
-          console.error("Price data error:", priceError);
-        } else {
-          priceData = price;
-        }
+        console.log("Subscription details:", JSON.stringify(subscriptionData, null, 2));
       }
     }
+
+    // 価格情報を取得
+    if (subscriptionData) {
+      const { data: price, error: priceError } = await supabase
+        .from("prices")
+        .select("*")
+        .eq("id", subscriptionData.price_id)
+        .single();
+      if (priceError) {
+        console.error("Price data error:", priceError);
+      } else {
+        priceData = price;
+      }
+    }
+  }
 
   // クライアントサイドの日本時間に変換する関数
   const toLocalDate = (dateString: string) => {

@@ -68,45 +68,46 @@ export default async function DashboardPage() {
   // Clerk ID から Supabaseユーザーを取得または作成
   const supabaseUser = await getOrCreateSupabaseUser(supabase, clerkUser);
   
-    // サブスクリプションを取得 (SupabaseユーザーIDがある場合に限る)
-    let subscriptionData: any = null;
-    let subscriptionError: any = null;
-    let isPremium = false;
+  // サブスクリプションを取得 (SupabaseユーザーIDがある場合に限る)
+  let subscriptionData: any = null;
+  let subscriptionError: any = null;
+  let isPremium = false;
 
-    if (supabaseUser) {
+  if (supabaseUser) {
     console.log(`Fetching subscription for Supabase user ID: ${supabaseUser.id}`);
     
     // まずデバッグのために全てのサブスクリプションを取得
     const { data: allSubs, error: debugError } = await supabase
-        .from("subscriptions")
-        .select("*");
+      .from("subscriptions")
+      .select("*");
         
     if (debugError) {
-        console.error("Debug subscription query error:", debugError);
+      console.error("Debug subscription query error:", debugError);
     } else {
-        console.log(`Found ${allSubs.length} total subscriptions in database`);
+      console.log(`Found ${allSubs.length} total subscriptions in database`);
     }
     
-    // このユーザーのサブスクリプションを取得
+    // このユーザーのアクティブなサブスクリプションを最新順で1件だけ取得
     const { data, error } = await supabase
-        .from("subscriptions")
-        .select("*, prices(*)")
-        .eq("user_id", supabaseUser.id)
-        .eq("status", "active")
-        .maybeSingle();
+      .from("subscriptions")
+      .select("*, prices(*)")
+      .eq("user_id", supabaseUser.id)
+      .eq("status", "active")
+      .order("created", { ascending: false })
+      .limit(1)
+      .maybeSingle();
     
     if (error) {
-        console.error("Subscription query error:", error);
-        subscriptionError = error;
+      console.error("Subscription query error:", error);
+      subscriptionError = error;
     } else {
-        console.log("Subscription data found:", data ? "Yes" : "No");
-        subscriptionData = data;
-        isPremium = !!subscriptionData;
+      console.log("Subscription data found:", data ? "Yes" : "No");
+      subscriptionData = data;
+      isPremium = !!subscriptionData;
     }
-    }
+  }
 
   // 成功パラメータがある場合（サブスクリプション購入後など）
-  // SSRでは "globalThis.location" がない場合もあるので一時的にエラー回避
   let success = false;
   try {
     const searchParams = new URL(globalThis.location?.href || "http://localhost").searchParams;

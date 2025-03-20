@@ -56,15 +56,18 @@ export default async function PremiumFeaturePage() {
   const supabaseUser = await getOrCreateSupabaseUser(supabase, clerkUser);
   
   if (!supabaseUser) {
-    // そもそもユーザーが存在しない = サブスクない
+    // そもそもユーザーが存在しない = サブスクなし
     redirect("/pricing?notice=premium_required");
   }
 
+  // アクティブなサブスクリプションを最新1件だけ取得
   const { data: subscription, error } = await supabase
     .from("subscriptions")
     .select("*")
     .eq("user_id", supabaseUser.id)
     .eq("status", "active")
+    .order("created", { ascending: false })
+    .limit(1)
     .maybeSingle();
 
   if (error) {

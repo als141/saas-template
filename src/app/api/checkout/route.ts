@@ -78,102 +78,103 @@ export async function POST(req: Request) {
     // Supabaseのユーザーを取得または作成
     const supabaseUser = await getOrCreateSupabaseUser(supabase, clerkUser);
 
-    // Stripeから価格情報を取得（価格が存在しない場合は作成するロジック）
+    // すでにアクティブなサブスクリプションがあるかどうかチェック
+    const { data: existingSubscription, error: subCheckError } = await supabase
+      .from("subscriptions")
+      .select("*")
+      .eq("user_id", supabaseUser.id)
+      .eq("status", "active")
+      .maybeSingle();
+
+    if (subCheckError) {
+      console.error("Checkout: Subscription check error:", subCheckError);
+      return NextResponse.json(
+        { error: "サブスクリプション状況の確認に失敗しました" },
+        { status: 500 }
+      );
+    }
+
+    // もし既にアクティブなサブスクリプションが存在するなら、
+    // ここで新規契約しないようにして顧客ポータルなどに誘導
+    if (existingSubscription) {
+      console.log("Checkout: User already has an active subscription. Redirect to portal or return an error.");
+      return NextResponse.json(
+        {
+          error: "すでにサブスクリプションがあります。プラン変更は顧客ポータルから行ってください。",
+          portalUrl: "/api/create-portal" // ここでポータルのエンドポイントを返すなど
+        },
+        { status: 400 }
+      );
+    }
+
+    // ここから先はサブスクリプションを持っていない場合のみ実行（新規契約）
+
+    // Stripeから価格情報を取得
+    let price;
     try {
-      const price = await stripe.prices.retrieve(priceId);
+      price = await stripe.prices.retrieve(priceId);
       console.log(`Retrieved price from Stripe: ${priceId}`, price);
-      
-      // 価格情報がSupabaseにあるか確認
-      const { data: existingPrice, error: priceError } = await supabase
-        .from("prices")
-        .select("*")
-        .eq("id", priceId)
-        .single();
-      
-      if (priceError && priceError.code !== 'PGRST116') {
-        console.error("Price lookup error:", priceError);
-      }
-        
-      if (!existingPrice) {
-        // 製品が存在するか確認
-        const { data: existingProduct, error: productError } = await supabase
-          .from("products")
-          .select("*")
-          .eq("id", price.product)
-          .single();
-        
-        if (productError && productError.code !== 'PGRST116') {
-          console.error("Product lookup error:", productError);
-        }
-          
-        if (!existingProduct) {
-          // Stripeから製品情報を取得して作成
-          const product = await stripe.products.retrieve(price.product as string);
-          const { error: productError } = await supabase.from("products").insert({
-            id: product.id,
-            name: product.name,
-            description: product.description,
-            active: product.active,
-            metadata: product.metadata,
-          });
-          if (productError) {
-            console.error("Error creating product:", productError);
-          } else {
-            console.log(`Product created: ${product.id}`);
-          }
-        }
-        
-        // 価格を作成
-        const { error: priceError } = await supabase.from("prices").insert({
-          id: price.id,
-          product_id: price.product,
-          active: price.active,
-          unit_amount: price.unit_amount,
-          currency: price.currency,
-          description: price.nickname,
-          type: price.type,
-          interval: price.type === "recurring" ? price.recurring?.interval : null,
-          interval_count: price.type === "recurring" ? price.recurring?.interval_count : null,
-          metadata: price.metadata,
-        });
-        
-        if (priceError) {
-          console.error("Error creating price:", priceError);
-        } else {
-          console.log(`Price created: ${price.id}`);
-        }
-      }
     } catch (error) {
-      console.error("Failed to retrieve or store price information:", error);
+      console.error("Failed to retrieve price:", error);
       return NextResponse.json(
         { error: "Stripeの価格情報の取得に失敗しました" },
         { status: 500 }
       );
     }
 
-    // 同じpriceIdのサブスクリプションが既にactiveかどうか確認（ユーザーIDはSupabaseのUUID）
-    const { data: existingSubscription, error: subError } = await supabase
-      .from("subscriptions")
+    // Supabase内の prices / products テーブルも同期（初回のみ）
+    // ここでは例として必要があれば登録しておく
+    // -------------------------------------------------------------------
+    // 同期用に価格・商品が既に登録済みか確認
+    const { data: existingPrice } = await supabase
+      .from("prices")
       .select("*")
-      .eq("user_id", supabaseUser.id)
-      .eq("price_id", priceId)
-      .eq("status", "active")
+      .eq("id", price.id)
       .maybeSingle();
+    
+    if (!existingPrice) {
+      // 商品側チェック
+      const productId = typeof price.product === "string" ? price.product : price.product?.id;
+      if (productId) {
+        const { data: existingProduct } = await supabase
+          .from("products")
+          .select("*")
+          .eq("id", productId)
+          .maybeSingle();
+        
+        // Productが無ければStripeから取得して登録
+        if (!existingProduct) {
+          const stripeProduct = await stripe.products.retrieve(productId);
+          await supabase.from("products").insert({
+            id: stripeProduct.id,
+            name: stripeProduct.name,
+            description: stripeProduct.description,
+            active: stripeProduct.active,
+            metadata: stripeProduct.metadata,
+          });
+          console.log(`Product created in DB: ${stripeProduct.id}`);
+        }
+      }
 
-    if (subError && subError.code !== 'PGRST116') {
-      console.error("Subscription check error:", subError);
-    }
-
-    if (existingSubscription) {
-      return NextResponse.json(
-        { error: "すでに有効なサブスクリプションがあります" },
-        { status: 400 }
-      );
+      // Priceを登録
+      await supabase.from("prices").insert({
+        id: price.id,
+        product_id: typeof price.product === "string" ? price.product : price.product?.id,
+        active: price.active,
+        unit_amount: price.unit_amount,
+        currency: price.currency,
+        description: price.nickname,
+        type: price.type,
+        interval: price.type === "recurring" ? price.recurring?.interval : null,
+        interval_count: price.type === "recurring" ? price.recurring?.interval_count : null,
+        metadata: price.metadata,
+      });
+      console.log(`Price created in DB: ${price.id}`);
     }
 
     console.log(`Creating checkout session for user (SupabaseID): ${supabaseUser.id} and price ${priceId}`);
 
-    // Stripeのセッションを作成
+    // Stripeのセッション（Checkout）を作成
     const session = await stripe.checkout.sessions.create({
       customer_email: clerkUser.emailAddresses[0].emailAddress,
       line_items: [
